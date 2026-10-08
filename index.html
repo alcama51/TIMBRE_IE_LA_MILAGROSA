@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timbre Escolar ESP32-C3</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif}
+body{background:#0a1f44;color:white;min-height:100vh}
+header{background:#073b7a;padding:20px;text-align:center;border-bottom:4px solid #ffd500}
+header h1{color:#ffd500;font-size:28px} header p{margin-top:5px}
+.container{max-width:1000px;margin:auto;padding:20px}
+.status{display:flex;justify-content:space-between;align-items:center;background:#102d59;padding:18px;border-radius:12px;margin-bottom:20px}
+.status-online{color:#00ff66;font-weight:bold}.clock{font-size:25px;color:#ffd500;font-weight:bold}
+.card{background:white;color:#222;border-radius:15px;padding:20px;margin-bottom:20px;box-shadow:0 5px 15px rgba(0,0,0,.25)}
+.card h2{color:#073b7a;margin-bottom:18px}
+.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:15px}
+label{font-weight:bold;display:block;margin-bottom:6px}
+input[type="time"],input[type="number"]{width:100%;padding:12px;border:2px solid #ddd;border-radius:8px;font-size:17px}
+.days{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.day{background:#e8eef7;padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:bold}
+.day input{margin-right:5px}
+button{border:none;border-radius:8px;padding:13px 20px;font-size:16px;font-weight:bold;cursor:pointer;margin-top:15px}
+.btn-save{background:#073b7a;color:white}.btn-save:hover{background:#0b55a5}
+.btn-ring{background:#ffd500;color:#111;width:100%;font-size:20px;padding:18px}.btn-ring:hover{background:#ffbf00}
+.btn-delete{background:#d62828;color:white;padding:8px 12px;margin:0}
+table{width:100%;border-collapse:collapse}th{background:#073b7a;color:white;padding:12px}
+td{padding:12px;border-bottom:1px solid #ddd;text-align:center}.empty{text-align:center;color:#777;padding:20px}
+.message{margin-top:15px;padding:12px;border-radius:8px;display:none;text-align:center;font-weight:bold}
+.success{background:#d4edda;color:#155724}.error{background:#f8d7da;color:#721c24}
+footer{text-align:center;padding:20px;color:#ccc}
+@media(max-width:700px){.form-grid{grid-template-columns:1fr}.status{flex-direction:column;gap:10px}table{font-size:13px}}
+</style>
+</head>
+<body>
+<header><h1>🔔 TIMBRE ESCOLAR INTELIGENTE</h1><p>Control mediante ESP32-C3</p></header>
+<div class="container">
+<div class="status">
+<div><strong>Estado del ESP32:</strong> <span class="status-online">● CONECTADO</span></div>
+<div><strong>Hora:</strong> <span class="clock" id="clock">00:00:00</span></div>
+</div>
+
+<div class="card">
+<h2>⏰ Programar timbre</h2>
+<div class="form-grid">
+<div><label>Hora</label><input type="time" id="hora" value="07:00"></div>
+<div><label>Duración (segundos)</label><input type="number" id="duracion" min="1" max="60" value="5"></div>
+</div>
+<label style="margin-top:20px;">Días de funcionamiento</label>
+<div class="days">
+<label class="day"><input type="checkbox" value="1" checked>Lunes</label>
+<label class="day"><input type="checkbox" value="2" checked>Martes</label>
+<label class="day"><input type="checkbox" value="3" checked>Miércoles</label>
+<label class="day"><input type="checkbox" value="4" checked>Jueves</label>
+<label class="day"><input type="checkbox" value="5" checked>Viernes</label>
+<label class="day"><input type="checkbox" value="6">Sábado</label>
+<label class="day"><input type="checkbox" value="0">Domingo</label>
+</div>
+<button class="btn-save" onclick="guardarHorario()">💾 GUARDAR HORARIO</button>
+<div id="message" class="message"></div>
+</div>
+
+<div class="card">
+<h2>🔔 Control manual</h2>
+<p>Presiona el botón para activar la campana inmediatamente.</p>
+<button class="btn-ring" onclick="tocarTimbre()">🔔 TOCAR TIMBRE AHORA</button>
+</div>
+
+<div class="card">
+<h2>📅 Horarios programados</h2>
+<table><thead><tr><th>Hora</th><th>Duración</th><th>Días</th><th>Acción</th></tr></thead>
+<tbody id="tablaHorarios"></tbody></table>
+</div>
+
+<div class="card">
+<h2>⚙️ Configuración ESP32-C3</h2>
+<p><strong>Dispositivo:</strong> ESP32-C3</p>
+<p><strong>Reloj:</strong> DS3231</p>
+<p><strong>Salida:</strong> Relé 5 V</p>
+<p><strong>Campana:</strong> 12 V DC</p>
+</div>
+</div>
+<footer>Timbre Escolar Inteligente<br>ESP32-C3 + DS3231</footer>
+
+<script>
+let horarios=JSON.parse(localStorage.getItem("horarios"))||[];
+
+function actualizarReloj(){
+ const ahora=new Date();
+ const h=String(ahora.getHours()).padStart(2,"0");
+ const m=String(ahora.getMinutes()).padStart(2,"0");
+ const s=String(ahora.getSeconds()).padStart(2,"0");
+ document.getElementById("clock").textContent=`${h}:${m}:${s}`;
+}
+setInterval(actualizarReloj,1000); actualizarReloj();
+
+function guardarHorario(){
+ const hora=document.getElementById("hora").value;
+ const duracion=parseInt(document.getElementById("duracion").value);
+ const dias=Array.from(document.querySelectorAll('.day input:checked')).map(c=>c.value);
+ if(!hora){mostrarMensaje("Seleccione una hora",false);return}
+ if(dias.length===0){mostrarMensaje("Seleccione al menos un día",false);return}
+ horarios.push({id:Date.now(),hora,duracion,dias});
+ localStorage.setItem("horarios",JSON.stringify(horarios));
+ mostrarHorarios();
+ mostrarMensaje("Horario guardado correctamente",true);
+}
+
+function mostrarHorarios(){
+ const tabla=document.getElementById("tablaHorarios"); tabla.innerHTML="";
+ if(horarios.length===0){
+  tabla.innerHTML='<tr><td colspan="4" class="empty">No hay horarios programados</td></tr>'; return;
+ }
+ horarios.sort((a,b)=>a.hora.localeCompare(b.hora));
+ horarios.forEach(h=>{
+  const tr=document.createElement("tr");
+  tr.innerHTML=`<td>${h.hora}</td><td>${h.duracion} s</td><td>${obtenerDias(h.dias)}</td>
+  <td><button class="btn-delete" onclick="eliminarHorario(${h.id})">🗑️</button></td>`;
+  tabla.appendChild(tr);
+ });
+}
+
+function obtenerDias(dias){
+ const nombres={"0":"Dom","1":"Lun","2":"Mar","3":"Mié","4":"Jue","5":"Vie","6":"Sáb"};
+ return dias.map(d=>nombres[d]).join(" - ");
+}
+function eliminarHorario(id){
+ horarios=horarios.filter(h=>h.id!==id);
+ localStorage.setItem("horarios",JSON.stringify(horarios));
+ mostrarHorarios();
+}
+function tocarTimbre(){
+ mostrarMensaje("🔔 Interfaz preparada. Falta conectar la comunicación con el ESP32-C3.",true);
+}
+function mostrarMensaje(texto,correcto){
+ const mensaje=document.getElementById("message");
+ mensaje.textContent=texto;
+ mensaje.className="message "+(correcto?"success":"error");
+ mensaje.style.display="block";
+ setTimeout(()=>mensaje.style.display="none",4000);
+}
+mostrarHorarios();
+</script>
+</body>
+</html>
